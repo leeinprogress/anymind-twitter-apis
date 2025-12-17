@@ -1,5 +1,3 @@
-"""Twitter API Client"""
-
 import httpx
 
 from app.bootstrap.config import Settings
@@ -18,11 +16,15 @@ from app.infrastructure.twitter.rate_limiter import RateLimiter
 
 
 class TwitterClient(TweetRepository):
-    """Client for interacting with Twitter API v2"""
-    
-    def __init__(self, settings: Settings, rate_limiter: RateLimiter | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        http_client: httpx.AsyncClient,
+        rate_limiter: RateLimiter | None = None
+    ):
         self.settings = settings
         self.base_url = settings.twitter_api_base_url
+        self.http_client = http_client
         self.authenticator = TwitterAuthenticator(settings)
         self.rate_limiter = rate_limiter or RateLimiter()
     
@@ -42,42 +44,40 @@ class TwitterClient(TweetRepository):
         query = f"#{hashtag}"
         
         # Call Twitter API
-        async with httpx.AsyncClient() as client:
-            try:
-                await self.rate_limiter.acquire("search_tweets")
+        try:
+            await self.rate_limiter.acquire("search_tweets")
+            
+            response = await self.http_client.get(
+                f"{self.base_url}/tweets/search/recent",
+                params={
+                    "query": query,
+                    "max_results": min(limit, 100),
+                    "tweet.fields": "created_at,author_id,public_metrics,entities",
+                    "expansions": "author_id",
+                    "user.fields": "id,name,username"
+                },
+                headers=self.authenticator.get_headers()
+            )
+            
+            self._handle_response_errors(response)
+            
+            # Parse response
+            data = response.json()
+            includes = data.get("includes", {})
+            
+            # Map to entities
+            tweets = []
+            for tweet_data in data.get("data", []):
+                tweet = map_tweet(tweet_data, includes)
+                if tweet:
+                    tweets.append(tweet)
+            
+            return tweets
                 
-                response = await client.get(
-                    f"{self.base_url}/tweets/search/recent",
-                    params={
-                        "query": query,
-                        "max_results": min(limit, 100),
-                        "tweet.fields": "created_at,author_id,public_metrics,entities",
-                        "expansions": "author_id",
-                        "user.fields": "id,name,username"
-                    },
-                    headers=self.authenticator.get_headers(),
-                    timeout=30.0
-                )
-                
-                self._handle_response_errors(response)
-                
-                # Parse response
-                data = response.json()
-                includes = data.get("includes", {})
-                
-                # Map to entities
-                tweets = []
-                for tweet_data in data.get("data", []):
-                    tweet = map_tweet(tweet_data, includes)
-                    if tweet:
-                        tweets.append(tweet)
-                
-                return tweets
-                
-            except httpx.RequestError as e:
-                raise TwitterServiceUnavailableError(
-                    f"Failed to connect to Twitter API: {str(e)}"
-                )
+        except httpx.RequestError as e:
+            raise TwitterServiceUnavailableError(
+                f"Failed to connect to Twitter API: {str(e)}"
+            )
     
     async def get_tweets_by_user(self, username: str, limit: int = 30) -> list[Tweet]:
         """
@@ -93,57 +93,54 @@ class TwitterClient(TweetRepository):
         # Clean username
         username = username.lstrip("@")
         
-        async with httpx.AsyncClient() as client:
-            try:
-                await self.rate_limiter.acquire("get_user")
+        try:
+            await self.rate_limiter.acquire("get_user")
+            
+            # First, get user info
+            user_response = await self.http_client.get(
+                f"{self.base_url}/users/by/username/{username}",
+                params={"user.fields": "id,name,username"},
+                headers=self.authenticator.get_headers()
+            )
+            
+            self._handle_response_errors(user_response)
+            user_data = user_response.json()["data"]
+            user_id = user_data["id"]
+            
+            await self.rate_limiter.acquire("user_timeline")
+            
+            # Get user's tweets
+            tweets_response = await self.http_client.get(
+                f"{self.base_url}/users/{user_id}/tweets",
+                params={
+                    "max_results": min(limit, 100),
+                    "tweet.fields": "created_at,author_id,public_metrics,entities",
+                    "user.fields": "id,name,username"
+                },
+                headers=self.authenticator.get_headers()
+            )
+            
+            self._handle_response_errors(tweets_response)
+            
+            # Parse response
+            data = tweets_response.json()
+            
+            # Create includes with user data
+            includes = {"users": [user_data]}
+            
+            # Map to entities
+            tweets = []
+            for tweet_data in data.get("data", []):
+                tweet = map_tweet(tweet_data, includes)
+                if tweet:
+                    tweets.append(tweet)
+            
+            return tweets
                 
-                # First, get user info
-                user_response = await client.get(
-                    f"{self.base_url}/users/by/username/{username}",
-                    params={"user.fields": "id,name,username"},
-                    headers=self.authenticator.get_headers(),
-                    timeout=30.0
-                )
-                
-                self._handle_response_errors(user_response)
-                user_data = user_response.json()["data"]
-                user_id = user_data["id"]
-                
-                await self.rate_limiter.acquire("user_timeline")
-                
-                # Get user's tweets
-                tweets_response = await client.get(
-                    f"{self.base_url}/users/{user_id}/tweets",
-                    params={
-                        "max_results": min(limit, 100),
-                        "tweet.fields": "created_at,author_id,public_metrics,entities",
-                        "user.fields": "id,name,username"
-                    },
-                    headers=self.authenticator.get_headers(),
-                    timeout=30.0
-                )
-                
-                self._handle_response_errors(tweets_response)
-                
-                # Parse response
-                data = tweets_response.json()
-                
-                # Create includes with user data
-                includes = {"users": [user_data]}
-                
-                # Map to entities
-                tweets = []
-                for tweet_data in data.get("data", []):
-                    tweet = map_tweet(tweet_data, includes)
-                    if tweet:
-                        tweets.append(tweet)
-                
-                return tweets
-                
-            except httpx.RequestError as e:
-                raise TwitterServiceUnavailableError(
-                    f"Failed to connect to Twitter API: {str(e)}"
-                )
+        except httpx.RequestError as e:
+            raise TwitterServiceUnavailableError(
+                f"Failed to connect to Twitter API: {str(e)}"
+            )
     
     def _handle_response_errors(self, response: httpx.Response) -> None:
         """Handle HTTP response errors"""
