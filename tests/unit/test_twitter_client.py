@@ -7,6 +7,7 @@ from app.core.exceptions import (
     TwitterAuthenticationError,
     TwitterRateLimitError,
     TwitterResourceNotFoundError,
+    TwitterServiceUnavailableError,
 )
 from app.infrastructure.twitter.client import TwitterClient
 from tests.fixtures.twitter_responses import (
@@ -121,4 +122,55 @@ class TestTwitterClient:
         
         call_args = mock_http_client.get.call_args
         assert call_args.kwargs["params"]["max_results"] == 100
+    
+    @pytest.mark.asyncio
+    async def test_network_error(
+        self, twitter_client: TwitterClient, mock_http_client: AsyncMock
+    ):
+        mock_http_client.get.side_effect = httpx.RequestError("Connection timeout")
+        
+        with pytest.raises(TwitterServiceUnavailableError) as exc_info:
+            await twitter_client.get_tweets_by_hashtag("Python", limit=10)
+        
+        assert "Failed to connect to Twitter API" in str(exc_info.value)
+    
+    @pytest.mark.asyncio
+    async def test_server_error_500(
+        self, twitter_client: TwitterClient, mock_http_client: AsyncMock
+    ):
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+        mock_http_client.get.return_value = mock_response
+        
+        with pytest.raises(TwitterServiceUnavailableError) as exc_info:
+            await twitter_client.get_tweets_by_hashtag("Python", limit=10)
+        
+        assert "Twitter service error" in str(exc_info.value)
+    
+    @pytest.mark.asyncio
+    async def test_empty_response_data(
+        self, twitter_client: TwitterClient, mock_http_client: AsyncMock
+    ):
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": [], "includes": {"users": []}}
+        mock_http_client.get.return_value = mock_response
+        
+        tweets = await twitter_client.get_tweets_by_hashtag("RareHashtag", limit=10)
+        
+        assert tweets == []
+    
+    @pytest.mark.asyncio
+    async def test_get_tweets_by_user_first_call_fails(
+        self, twitter_client: TwitterClient, mock_http_client: AsyncMock
+    ):
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 404
+        mock_response.json.return_value = MOCK_ERROR_RESPONSE_404
+        mock_response.text = "User not found"
+        mock_http_client.get.return_value = mock_response
+        
+        with pytest.raises(TwitterResourceNotFoundError):
+            await twitter_client.get_tweets_by_user("nonexistent_user", limit=10)
 
