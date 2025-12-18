@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app import __version__
+from app.bootstrap.middleware import setup_middleware
 from app.bootstrap.routes import setup_routes
 
 # Create FastAPI app
@@ -9,6 +10,9 @@ app = FastAPI(
     version=__version__,
     description="RESTful API for fetching tweets by hashtag and user",
 )
+
+# Setup middleware
+setup_middleware(app)
 
 # Setup routes
 setup_routes(app)

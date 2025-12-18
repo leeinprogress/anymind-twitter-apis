@@ -18,6 +18,7 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379")
 os.environ.setdefault("REDIS_ENABLED", "false")
 os.environ.setdefault("LOG_LEVEL", "INFO")
 os.environ.setdefault("LOG_FORMAT", "json")
+os.environ.setdefault("CORS_ORIGINS", "")
 
 # Mock load_dotenv to prevent file access in tests
 with patch('dotenv.load_dotenv', return_value=None):
@@ -42,6 +43,7 @@ def test_settings() -> Settings:
         redis_enabled=False,
         log_level="INFO",
         log_format="json",
+        cors_origins="",
     )
 
 

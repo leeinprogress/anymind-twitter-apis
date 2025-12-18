@@ -23,7 +23,16 @@ class Settings(BaseModel):
     
     # Logging
     log_level: str 
-    log_format: str 
+    log_format: str
+    
+    # CORS
+    cors_origins: str
+    
+    @property
+    def cors_origins_list(self) -> list[str]:
+        if not self.cors_origins or self.cors_origins == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.cors_origins.split(",")]
 
 
 _settings: Settings | None = None

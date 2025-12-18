@@ -37,4 +37,5 @@ def load_environment() -> dict[str, Any]:
         "redis_enabled": os.getenv("REDIS_ENABLED", "false").lower() == "true",
         "log_level": os.getenv("LOG_LEVEL", "INFO"),
         "log_format": os.getenv("LOG_FORMAT", "json"),
+        "cors_origins": os.getenv("CORS_ORIGINS", ""),
     }
