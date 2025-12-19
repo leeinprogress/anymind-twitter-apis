@@ -1,5 +1,7 @@
 # Twitter API Service
 
+> **GitHub Repository**: https://github.com/leeinprogress/anymind-twitter-apis
+
 RESTful API service for fetching tweets from Twitter API v2.
 
 ##  Features
@@ -42,7 +44,7 @@ Clean Architecture with 4 layers:
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/leeinprogress/anymind-twitter-apis.git
 cd anymind-twitter-apis
 ```
 
